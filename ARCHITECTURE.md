@@ -84,13 +84,16 @@ Low solar states (<3 GW): HP, UK, JK, NE states, hydro-dominant states
 
 **Reduction formula:**
 ```
-solar_reduction = solar_weight × (irradiance / irradiance_peak_reference) × max_reduction_cap
+solar_reduction = (irradiance / irradiance_peak_ref) × max_reduction_cap
 
 Where:
-  solar_weight:          0.35 (high), 0.20 (medium), 0.08 (low)
-  irradiance_peak_ref:   900 W/m² (clear sky peak at solar noon, India)
-  max_reduction_cap:     35% (high solar), 20% (medium), 8% (low)
+  irradiance_peak_ref:  900 W/m² (clear sky peak at solar noon, India)
+  max_reduction_cap:    0.35 (high solar states), 0.20 (medium), 0.08 (low)
 ```
+
+Note: one multiplier only. The state's solar tier determines which cap to use —
+it is not a separate weight multiplied on top. At peak irradiance (900 W/m²),
+a high-solar state sees exactly 35% reduction maximum. No squaring of coefficients.
 
 ---
 
@@ -109,13 +112,15 @@ Low wind: all others
 
 **Reduction formula:**
 ```
-wind_reduction = wind_weight × min(windspeed / 25.0, 1.0) × max_wind_cap
+wind_reduction = min(windspeed / 25.0, 1.0) × max_wind_cap
 
 Where:
-  wind_weight:    0.20 (high), 0.10 (medium), 0.03 (low)
-  max_wind_cap:   20% (high), 10% (medium), 3% (low)
-  25 km/h:        reference speed for rated power output
+  max_wind_cap:  0.20 (high wind states), 0.10 (medium), 0.03 (low)
+  25 km/h:       reference speed for rated power output
 ```
+
+Note: one multiplier only. Same principle as solar — the state's wind tier
+determines the cap, not an additional weight coefficient.
 
 ---
 
@@ -179,27 +184,38 @@ Single Worker, two endpoints:
 {
   "stateCode": "TG",
   "stateName": "Telangana",
-  "gCo2PerKwh": 387.4,
-  "consumerGCo2PerKwh": 459.8,
-  "solarReduction": 0.142,
-  "windReduction": 0.021,
-  "demandFactor": 0.12,
-  "ceaBaseline": 450.0,
+  "gCo2PerKwh": 468.1,
+  "generationGCo2PerKwh": 380.8,
+  "ceaBaselineGCo2PerKwh": 450.0,
   "tdLossPercent": 18.65,
+  "solarReduction": 0.121,
+  "windReduction": 0.017,
+  "demandFactor": -0.02,
   "irradianceWm2": 312.4,
   "windSpeedKmh": 14.2,
   "isEstimated": true,
-  "estimationMethod": "CEA-V21.0-NASA-POWER-OpenMeteo",
+  "estimationMethod": "CEA-V21.0 + NASA-POWER + Open-Meteo",
   "timestamp": "2026-06-28T14:00:00+05:30",
-  "forecast6h": [412.1, 398.3, 356.2, 401.7, 478.9, 491.2]
+  "forecast6h": [481.1, 527.4, 547.0, 609.0, 609.0, 609.0]
 }
 ```
 
-### `GET /allstates`
-Same model, run for all 36 states in parallel (Cloudflare Workers handle this easily).
-Used for the "India map" / rankings view.
+Verification:
+- solar_reduction = (312.4 / 900) × 0.35 = 0.121
+- wind_reduction  = (14.2 / 25) × 0.03  = 0.017
+- demand_factor   = -0.02 (hour 14 IST, solar active)
+- generation      = 450 × (1 - 0.121) × (1 - 0.017) × (1 - 0.02) = 380.8 gCO2/kWh
+- consumer        = 380.8 / (1 - 0.1865) = 468.1 gCO2/kWh
 
-**Caching:** 30-minute cache via Cloudflare KV. NASA POWER updates hourly,
+### `GET /allstates`
+Same model, run for all 36 states. NASA POWER enforces 5 req/sec per IP, so
+states are processed in **batches of 4 with a 1-second delay between batches**
+(9 batches × ~1s = ~9 seconds total). Open-Meteo runs in parallel within each
+batch (no rate limit). Result is sorted by consumer intensity ascending (cleanest
+state first) with a rank field. Intended for the India map / rankings view,
+called once on launch and refreshed every 30 minutes via Room DB cache.
+
+**Caching:** 30-minute cache via Cloudflare Cache API. NASA POWER updates hourly,
 Open-Meteo updates every 15 min. 30 min is a reasonable refresh for this use case.
 
 ---
@@ -268,5 +284,5 @@ Open-Meteo updates every 15 min. 30 min is a reasonable refresh for this use cas
 
 ---
 
-*Architecture version 1.0 — June 2026*
+*Architecture version 1.1 — June 2026 (fixed: solar/wind formula double-weighting, NASA rate limiting, example JSON math)*
 *Gokul Krishna TB | creator619-python.github.io*
